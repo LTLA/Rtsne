@@ -200,7 +200,7 @@ void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, doubl
         if(exact) {
             computeExactGradient(P.data(), Y, N, NDims, dY.data());
         } else {
-            computeGradient(P.data(), row_P.data(), col_P.data(), val_P.data(), Y, N, NDims, dY.data(), theta);
+            computeGradient(P.data(), row_P.data(), col_P.data(), val_P.data(), Y, N, dY.data(), theta);
         }
 
         // Update gains
@@ -217,7 +217,7 @@ void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, doubl
         }
 
         // Make solution zero-mean
-        zeroMean(Y, N, NDims);
+        zeroMean(Y, N);
 
         // Print out progress
         if((iter > 0 && (iter+1) % 50 == 0) || iter == max_iter - 1) {
@@ -225,7 +225,7 @@ void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, doubl
             if(exact) {
                 C = evaluateError(P.data(), Y, N, NDims);
             } else {
-                C = evaluateError(row_P.data(), col_P.data(), val_P.data(), Y, N, NDims, theta);  // doing approximate computation here!
+                C = evaluateError(row_P.data(), col_P.data(), val_P.data(), Y, N, theta);  // doing approximate computation here!
             }
             ++itercost;
 
@@ -260,13 +260,14 @@ void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, doubl
 
 // Compute gradient of the t-SNE cost function (using Barnes-Hut algorithm)
 template <int NDims>
-void TSNE<NDims>::computeGradient(double* P, unsigned int* inp_row_P, unsigned int* inp_col_P, double* inp_val_P, double* Y, unsigned int N, int D, double* dC, double theta)
+void TSNE<NDims>::computeGradient(double* P, unsigned int* inp_row_P, unsigned int* inp_col_P, double* inp_val_P, double* Y, unsigned int N, double* dC, double theta)
 {
     // Construct space-partitioning tree on current map
     SPTree<NDims> tree(Y, N);
 
     // Compute all terms required for t-SNE gradient
-    std::vector<double> pos_f(N*D), neg_f(N*D);
+    const unsigned int Ntotal=N*NDims;
+    std::vector<double> pos_f(Ntotal), neg_f(Ntotal);
     tree.computeEdgeForces(inp_row_P, inp_col_P, inp_val_P, N, pos_f.data(), num_threads);
 
     // Storing the output to sum in single-threaded mode; avoid randomness in rounding errors.
@@ -275,13 +276,13 @@ void TSNE<NDims>::computeGradient(double* P, unsigned int* inp_row_P, unsigned i
 
     #pragma omp parallel for schedule(guided) num_threads(num_threads)
     for (unsigned int n = 0; n < N; n++) {
-        output[n]=tree.computeNonEdgeForces(n, theta, neg_f.data() + n * D);
+        output[n]=tree.computeNonEdgeForces(n, theta, neg_f.data() + n * NDims);
     }
 
     double sum_Q = std::accumulate(output.begin(), output.end(), 0.0);
 
     // Compute final t-SNE gradient
-    for(unsigned int i = 0; i < N * D; i++) {
+    for(unsigned int i = 0; i < Ntotal; i++) {
         dC[i] = pos_f[i] - (neg_f[i] / sum_Q);
     }
 
@@ -363,9 +364,8 @@ double TSNE<NDims>::evaluateError(double* P, double* Y, unsigned int N, int D) {
 
 // Evaluate t-SNE cost function (approximately)
 template <int NDims>
-double TSNE<NDims>::evaluateError(unsigned int* row_P, unsigned int* col_P, double* val_P, double* Y, unsigned int N, int D, double theta)
+double TSNE<NDims>::evaluateError(unsigned int* row_P, unsigned int* col_P, double* val_P, double* Y, unsigned int N, double theta)
 {
-
     // Get estimate of normalization term
     SPTree<NDims> tree(Y, N);
     double sum_Q = .0;
@@ -373,7 +373,7 @@ double TSNE<NDims>::evaluateError(unsigned int* row_P, unsigned int* col_P, doub
 
     #pragma omp parallel num_threads(num_threads)
     {
-        std::vector<double> buff(D);
+        std::vector<double> buff(NDims);
 
          #pragma omp for schedule(guided) 
          for(unsigned int n = 0; n < N; n++) {
@@ -387,15 +387,15 @@ double TSNE<NDims>::evaluateError(unsigned int* row_P, unsigned int* col_P, doub
     // Loop over all edges to compute t-SNE error
     #pragma omp parallel for schedule(guided) num_threads(num_threads)
     for(unsigned int n = 0; n < N; n++) {
-        unsigned int ind1 = n * D;
+        unsigned int ind1 = n * NDims;
         double C=0;
 
         for (unsigned int i = row_P[n]; i < row_P[n + 1]; i++) {
-            unsigned ind2 = col_P[i] * D;
+            unsigned ind2 = col_P[i] * NDims;
             const double *y1=Y+ind1, *y2=Y+ind2;
 
             double Q = .0;
-            for(int d = 0; d < D; ++d, ++y1, ++y2) {
+            for(int d = 0; d < NDims; ++d, ++y1, ++y2) {
                 const double tmp=*y1-*y2;
                 Q += tmp * tmp;
             }
@@ -836,25 +836,25 @@ void TSNE<NDims>::computeSquaredEuclideanDistanceDirect(double* X, unsigned int 
 
 // Makes data zero-mean
 template <int NDims>
-void TSNE<NDims>::zeroMean(double* X, unsigned int N, int D) {
+void TSNE<NDims>::zeroMean(double* X, unsigned int N) {
 	// Compute data mean (need to update 'mean' prevents parallelization).
-    std::vector<double> mean(D);
+    std::vector<double> mean(NDims);
 
     for (unsigned int n = 0; n < N; ++n) {
-        const double* curX=X+n*D;
-        for (int d = 0; d < D; ++d, ++curX) {
+        const double* curX=X+n*NDims;
+        for (int d = 0; d < NDims; ++d, ++curX) {
             mean[d] += *curX;
         }
     }
-    for (int d = 0; d < D; ++d) {
+    for (int d = 0; d < NDims; ++d) {
         mean[d] /= N;
     }
 
     // Subtract data mean
     #pragma omp parallel for schedule(guided) num_threads(num_threads)
     for (unsigned int n = 0; n < N; ++n) {
-        double* curX=X+n*D;
-        for (int d = 0; d < D; ++d, ++curX) {
+        double* curX=X+n*NDims;
+        for (int d = 0; d < NDims; ++d, ++curX) {
               *curX -= mean[d];
         }
     }

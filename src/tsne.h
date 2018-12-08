@@ -53,13 +53,16 @@ private:
     void symmetrizeMatrix(unsigned int N); 
     void trainIterations(unsigned int N, double* Y, double* cost, double* itercost);
 
-    void computeGradient(double* P, unsigned int* inp_row_P, unsigned int* inp_col_P, double* inp_val_P, double* Y, unsigned int N, int D, double* dC, double theta);
+    void computeGradient(double* P, unsigned int* inp_row_P, unsigned int* inp_col_P, double* inp_val_P, double* Y, unsigned int N, double* dC, double theta);
     void computeExactGradient(double* P, double* Y, unsigned int N, int D, double* dC);
+
     double evaluateError(double* P, double* Y, unsigned int N, int D);
-    double evaluateError(unsigned int* row_P, unsigned int* col_P, double* val_P, double* Y, unsigned int N, int D, double theta);
+    double evaluateError(unsigned int* row_P, unsigned int* col_P, double* val_P, double* Y, unsigned int N, double theta);
+
     void getCost(double* P, double* Y, unsigned int N, int D, double* costs);
     void getCost(unsigned int* row_P, unsigned int* col_P, double* val_P, double* Y, unsigned int N, int D, double theta, double* costs);
-    void zeroMean(double* X, unsigned int N, int D);
+
+    void zeroMean(double* X, unsigned int N);
 
     void computeGaussianPerplexity(double* X, unsigned int N, int D, bool distance_precomputed);
     template<double (*distance)( const DataPoint&, const DataPoint& )>
@@ -70,8 +73,6 @@ private:
     void computeProbabilities(const double perplexity, const int K, const double* distances, double* cur_P);
     void computeSquaredEuclideanDistance(double* X, unsigned  int N, int D, double* DD);
     void computeSquaredEuclideanDistanceDirect(double* X, unsigned int N, int D, double* DD);
-    
-    double randn();
 
     // Member variables.
     double perplexity, theta, momentum, final_momentum, eta, exaggeration_factor;
