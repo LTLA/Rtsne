@@ -159,7 +159,8 @@ void TSNE<NDims>::run(const int* nn_index, const double* nn_dist, unsigned int N
 // Perform main training loop
 template<int NDims>
 void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, double* itercost) {
-    std::vector<double> dY(N*NDims), uY(N*NDims, 0), gains(N*NDims, 1);
+    const unsigned int Ntotal=N*NDims;
+    std::vector<double> dY(Ntotal), uY(Ntotal, 0), gains(Ntotal, 1);
 
     // Lie about the P-values
     {
@@ -179,60 +180,84 @@ void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, doubl
             }
         }
     }
+  
+    std::clock_t start = clock();
+    float total_time=0;
 
-  clock_t start = clock(), end;
-  float total_time=0;
-  int costi = 0; //iterator for saving the total costs for the iterations
-
-	for(int iter = 0; iter < max_iter; iter++) {
-
+	for (int iter = 0; iter < max_iter; ++iter) {
         // Stop lying about the P-values after a while, and switch momentum
-        if(iter == stop_lying_iter) {
-          if(exact) { for(unsigned long i = 0; i < (unsigned long)N * N; i++)        P[i] /= exaggeration_factor; }
-          else      { for(unsigned int i = 0; i < row_P[N]; i++) val_P[i] /= exaggeration_factor; }
+        if (iter == stop_lying_iter) {
+            std::vector<double>& cur_P=(exact ? P : val_P);
+            for (std::vector<double>::iterator pIt=cur_P.begin(); pIt!=cur_P.end(); ++pIt) { 
+                (*pIt) /= exaggeration_factor; 
+            }
         }
-        if(iter == mom_switch_iter) momentum = final_momentum;
+        if (iter == mom_switch_iter) {
+            momentum = final_momentum;
+        }
 
         // Compute (approximate) gradient
-        if(exact) computeExactGradient(P.data(), Y, N, NDims, dY.data());
-        else computeGradient(P.data(), row_P.data(), col_P.data(), val_P.data(), Y, N, NDims, dY.data(), theta);
+        if(exact) {
+            computeExactGradient(P.data(), Y, N, NDims, dY.data());
+        } else {
+            computeGradient(P.data(), row_P.data(), col_P.data(), val_P.data(), Y, N, NDims, dY.data(), theta);
+        }
 
         // Update gains
-        for(unsigned int i = 0; i < N * NDims; i++) gains[i] = (sign_tsne(dY[i]) != sign_tsne(uY[i])) ? (gains[i] + .2) : (gains[i] * .8);
-        for(unsigned int i = 0; i < N * NDims; i++) if(gains[i] < .01) gains[i] = .01;
+        for (unsigned int i = 0; i < Ntotal; ++i) {
+            gains[i] = (sign_tsne(dY[i]) != sign_tsne(uY[i])) ? (gains[i] + .2) : (gains[i] * .8);
+        }
+        for (unsigned int i = 0; i < Ntotal; ++i) {
+            if (gains[i] < 0.01) { gains[i] = 0.01; }
+        }
 
         // Perform gradient update (with momentum and gains)
-        for(unsigned int i = 0; i < N * NDims; i++) uY[i] = momentum * uY[i] - eta * gains[i] * dY[i];
-        for(unsigned int i = 0; i < N * NDims; i++)  Y[i] = Y[i] + uY[i];
+        for (unsigned int i = 0; i < Ntotal; ++i) {
+            uY[i] = momentum * uY[i] - eta * gains[i] * dY[i];
+        }
+        for (unsigned int i = 0; i < Ntotal; ++i) { 
+            Y[i] = Y[i] + uY[i];
+        }
 
         // Make solution zero-mean
         zeroMean(Y, N, NDims);
 
         // Print out progress
         if((iter > 0 && (iter+1) % 50 == 0) || iter == max_iter - 1) {
-            end = clock();
-            double C = .0;
-            if(exact) C = evaluateError(P.data(), Y, N, NDims);
-            else      C = evaluateError(row_P.data(), col_P.data(), val_P.data(), Y, N, NDims, theta);  // doing approximate computation here!
-            if(iter == 0) {
-                if (verbose) Rprintf("Iteration %d: error is %f\n", iter + 1, C);
+            double& C = (*itercost);
+            if(exact) {
+                C = evaluateError(P.data(), Y, N, NDims);
+            } else {
+                C = evaluateError(row_P.data(), col_P.data(), val_P.data(), Y, N, NDims, theta);  // doing approximate computation here!
             }
-            else {
-                total_time += (float) (end - start) / CLOCKS_PER_SEC;
-                if (verbose) Rprintf("Iteration %d: error is %f (50 iterations in %4.2f seconds)\n", iter+1, C, (float) (end - start) / CLOCKS_PER_SEC);
+            ++itercost;
+
+            if (verbose) {
+                if(iter == 0) {
+                    Rprintf("Iteration %d: error is %f\n", iter + 1, C);
+                } else {
+                    std::clock_t end = std::clock();
+                    float extra_time = static_cast<float>(end - start) / CLOCKS_PER_SEC;
+                    total_time += extra_time;
+                    Rprintf("Iteration %d: error is %f (50 iterations in %4.2f seconds)\n", iter+1, C, extra_time);
+	                start = std::clock();
+                }
             }
-            itercost[costi] = C;
-            itercost++;
-			  start = clock();
         }
     }
-    end = clock(); total_time += (float) (end - start) / CLOCKS_PER_SEC;
 
-    if(exact) getCost(P.data(), Y, N, NDims, cost);
-    else      getCost(row_P.data(), col_P.data(), val_P.data(), Y, N, NDims, theta, cost);  // doing approximate computation here!
-    
+    if(exact) {
+        getCost(P.data(), Y, N, NDims, cost);
+    } else {
+        getCost(row_P.data(), col_P.data(), val_P.data(), Y, N, NDims, theta, cost);  // doing approximate computation here!
+    }
+
     // Clean up memory
-    if (verbose) Rprintf("Fitting performed in %4.2f seconds.\n", total_time);
+    if (verbose) {
+        std::clock_t end = std::clock();
+        total_time += static_cast<float>(end - start) / CLOCKS_PER_SEC;
+        Rprintf("Fitting performed in %4.2f seconds.\n", total_time);
+    }
     return;
 }
 
