@@ -52,7 +52,6 @@ extern "C" {
     #include <R_ext/BLAS.h>
 }
 
-
 using namespace std;
 
 template <int NDims>
@@ -537,7 +536,7 @@ void TSNE<NDims>::computeGaussianPerplexity(double* X, unsigned int N, int D, bo
 }
 
 
-// Compute input similarities with a fixed perplexity using ball trees (this function allocates memory another function should free)
+// Compute input similarities with a fixed perplexity using ball trees.
 template <int NDims>
 template<double (*T)( const DataPoint&, const DataPoint& )>
 void TSNE<NDims>::computeGaussianPerplexity(double* X, unsigned int N, int D, int K) {
@@ -547,46 +546,49 @@ void TSNE<NDims>::computeGaussianPerplexity(double* X, unsigned int N, int D, in
     // Allocate the memory we need
     setupApproximateMemory(N, K);
 
-    // Build ball tree on data set
-      VpTree<DataPoint, T>* tree = new VpTree<DataPoint, T>();
-      vector<DataPoint> obj_X(N, DataPoint(D, -1, X));
-      for(unsigned int n = 0; n < N; n++) obj_X[n] = DataPoint(D, n, X + n * D);
-      tree->create(obj_X);
+    // Build VP tree on data set
+    VpTree<DataPoint, T> tree;
+    std::vector<DataPoint> obj_X;
+    obj_X.reserve(N);
+    for(unsigned int n = 0; n < N; ++n) obj_X.push_back(DataPoint(D, n, X + n * D));
+    tree.create(obj_X);
 
-      // Loop over all points to find nearest neighbors
-      if (verbose) Rprintf("Building tree...\n");
+    // Loop over all points to find nearest neighbors
+    if (verbose) Rprintf("Building tree...\n");
+  
+    int steps_completed = 0;
 
-      int steps_completed = 0;
-      #pragma omp parallel for schedule(guided) num_threads(num_threads)
-      for(unsigned int n = 0; n < N; n++) {
-
-        vector<DataPoint> indices;
-        vector<double> distances;
+    #pragma omp parallel num_threads(num_threads)
+    {
+        std::vector<DataPoint> indices;
+        std::vector<double> distances;
         indices.reserve(K+1);
         distances.reserve(K+1);
+  
+        #pragma omp for schedule(guided) 
+        for (unsigned int n = 0; n < N; ++n) {
+            indices.clear();
+            distances.clear();
 
-        // Find nearest neighbors
-        tree->search(obj_X[n], K + 1, &indices, &distances);
+            // Find nearest neighbors
+            tree.search(obj_X[n], K + 1, &indices, &distances);
 
-        double * cur_P = val_P.data() + row_P[n];
-        computeProbabilities(perplexity, K, distances.data()+1, cur_P); // +1 to avoid self.
+            double * cur_P = val_P.data() + row_P[n];
+            computeProbabilities(perplexity, K, distances.data()+1, cur_P); // +1 to avoid self.
 
-        unsigned int * cur_col_P = col_P.data() + row_P[n];
-        for (int m=0; m<K; ++m) {
-            cur_col_P[m] = indices[m+1].index(); // +1 to avoid self.
+            unsigned int * cur_col_P = col_P.data() + row_P[n];
+            for (int m=0; m<K; ++m) {
+                cur_col_P[m] = indices[m+1].index(); // +1 to avoid self.
+            }
+
+            if (verbose) { 
+                #pragma omp atomic
+                ++steps_completed;
+                if(steps_completed % 10000 == 0) Rprintf(" - point %d of %d\n", steps_completed, N);
+            }
         }
-
-        #pragma omp atomic
-        ++steps_completed;
-
-        if (verbose) { 
-          if(steps_completed % 10000 == 0) Rprintf(" - point %d of %d\n", steps_completed, N);
-        }
-      }
-
-      // Clean up memory
-      obj_X.clear();
-      delete tree;
+    }
+    return;
 }
 
 // Compute input similarities with a fixed perplexity from nearest-neighbour results.
