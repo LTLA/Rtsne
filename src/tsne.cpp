@@ -42,7 +42,7 @@
 #include "sptree.h"
 #include "vptree.h"
 #include "tsne.h"
-
+#include <algorithm>
 
 #ifdef _OPENMP
   #include <omp.h>
@@ -204,19 +204,16 @@ void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, doubl
         }
 
         // Update gains
+        #pragma omp parallel for schedule(guided) num_threads(num_threads)
         for (unsigned int i = 0; i < Ntotal; ++i) {
-            gains[i] = (sign_tsne(dY[i]) != sign_tsne(uY[i])) ? (gains[i] + .2) : (gains[i] * .8);
-        }
-        for (unsigned int i = 0; i < Ntotal; ++i) {
-            if (gains[i] < 0.01) { gains[i] = 0.01; }
+            gains[i] = std::max(0.01, (sign_tsne(dY[i]) != sign_tsne(uY[i])) ? (gains[i] + .2) : (gains[i] * .8));
         }
 
         // Perform gradient update (with momentum and gains)
+        #pragma omp parallel for schedule(guided) num_threads(num_threads)
         for (unsigned int i = 0; i < Ntotal; ++i) {
             uY[i] = momentum * uY[i] - eta * gains[i] * dY[i];
-        }
-        for (unsigned int i = 0; i < Ntotal; ++i) { 
-            Y[i] = Y[i] + uY[i];
+            Y[i] += uY[i];
         }
 
         // Make solution zero-mean
@@ -281,10 +278,7 @@ void TSNE<NDims>::computeGradient(double* P, unsigned int* inp_row_P, unsigned i
         output[n]=tree.computeNonEdgeForces(n, theta, neg_f.data() + n * D);
     }
 
-    double sum_Q = .0;
-    for (unsigned int n=0; n<N; ++n) {
-        sum_Q += output[n];
-    }
+    double sum_Q = std::accumulate(output.begin(), output.end(), 0.0);
 
     // Compute final t-SNE gradient
     for(unsigned int i = 0; i < N * D; i++) {
@@ -373,31 +367,47 @@ double TSNE<NDims>::evaluateError(unsigned int* row_P, unsigned int* col_P, doub
 {
 
     // Get estimate of normalization term
-    SPTree<NDims>* tree = new SPTree<NDims>(Y, N);
-    double* buff = (double*) calloc(D, sizeof(double));
+    SPTree<NDims> tree(Y, N);
     double sum_Q = .0;
-    for(unsigned int n = 0; n < N; n++) sum_Q += tree->computeNonEdgeForces(n, theta, buff);
+    std::vector<double> output(N);
+
+    #pragma omp parallel num_threads(num_threads)
+    {
+        std::vector<double> buff(D);
+
+         #pragma omp for schedule(guided) 
+         for(unsigned int n = 0; n < N; n++) {
+             std::fill(buff.begin(), buff.end(), 0);
+             output[n] = tree.computeNonEdgeForces(n, theta, buff.data());
+        }
+
+        sum_Q=std::accumulate(output.begin(), output.end(), 0.0);
+    }
 
     // Loop over all edges to compute t-SNE error
-    int ind1, ind2;
-    double C = .0, Q;
+    #pragma omp parallel for schedule(guided) num_threads(num_threads)
     for(unsigned int n = 0; n < N; n++) {
-        ind1 = n * D;
-        for(unsigned int i = row_P[n]; i < row_P[n + 1]; i++) {
-            Q = .0;
-            ind2 = col_P[i] * D;
-            for(int d = 0; d < D; d++) buff[d]  = Y[ind1 + d];
-            for(int d = 0; d < D; d++) buff[d] -= Y[ind2 + d];
-            for(int d = 0; d < D; d++) Q += buff[d] * buff[d];
+        unsigned int ind1 = n * D;
+        double C=0;
+
+        for (unsigned int i = row_P[n]; i < row_P[n + 1]; i++) {
+            unsigned ind2 = col_P[i] * D;
+            const double *y1=Y+ind1, *y2=Y+ind2;
+
+            double Q = .0;
+            for(int d = 0; d < D; ++d, ++y1, ++y2) {
+                const double tmp=*y1-*y2;
+                Q += tmp * tmp;
+            }
+
             Q = (1.0 / (1.0 + Q)) / sum_Q;
             C += val_P[i] * log((val_P[i] + FLT_MIN) / (Q + FLT_MIN));
         }
+
+        output[n]=C;
     }
 
-    // Clean up memory
-    free(buff);
-    delete tree;
-    return C;
+    return std::accumulate(output.begin(), output.end(), 0.0);
 }
 
 // Evaluate t-SNE cost function (exactly)
@@ -827,30 +837,27 @@ void TSNE<NDims>::computeSquaredEuclideanDistanceDirect(double* X, unsigned int 
 // Makes data zero-mean
 template <int NDims>
 void TSNE<NDims>::zeroMean(double* X, unsigned int N, int D) {
-	
-	// Compute data mean
-	double* mean = (double*) calloc(D, sizeof(double));
-  if(mean == NULL) {  Rcpp::stop("Memory allocation failed!\n"); }
-  int nD = 0;
-  for(unsigned int n = 0; n < N; n++) {
-    for(int d = 0; d < D; d++) {
-      mean[d] += X[nD + d];
-    }
-    nD += D;
-  }
-  for(int d = 0; d < D; d++) {
-    mean[d] /= (double) N;
-  }
+	// Compute data mean (need to update 'mean' prevents parallelization).
+    std::vector<double> mean(D);
 
-  // Subtract data mean
-  nD = 0;
-  for(unsigned int n = 0; n < N; n++) {
-    for(int d = 0; d < D; d++) {
-      X[nD + d] -= mean[d];
+    for (unsigned int n = 0; n < N; ++n) {
+        const double* curX=X+n*D;
+        for (int d = 0; d < D; ++d, ++curX) {
+            mean[d] += *curX;
+        }
     }
-    nD += D;
-  }
-  free(mean); mean = NULL;
+    for (int d = 0; d < D; ++d) {
+        mean[d] /= N;
+    }
+
+    // Subtract data mean
+    #pragma omp parallel for schedule(guided) num_threads(num_threads)
+    for (unsigned int n = 0; n < N; ++n) {
+        double* curX=X+n*D;
+        for (int d = 0; d < D; ++d, ++curX) {
+              *curX -= mean[d];
+        }
+    }
 }
 
 // declare templates explicitly
