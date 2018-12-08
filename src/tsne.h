@@ -53,11 +53,11 @@ private:
     void symmetrizeMatrix(unsigned int N); 
     void trainIterations(unsigned int N, double* Y, double* cost, double* itercost);
 
-    void computeGradient(double* P, unsigned int* inp_row_P, unsigned int* inp_col_P, double* inp_val_P, double* Y, unsigned int N, double* dC, double theta);
+    void computeGradient(double* P, unsigned int* inp_row_P, unsigned int* inp_col_P, double* inp_val_P, double* Y, unsigned int N, double* dC);
     void computeExactGradient(double* P, double* Y, unsigned int N, int D, double* dC);
 
     double evaluateError(double* P, double* Y, unsigned int N, int D);
-    double evaluateError(unsigned int* row_P, unsigned int* col_P, double* val_P, double* Y, unsigned int N, double theta);
+    double evaluateError(unsigned int* row_P, unsigned int* col_P, double* val_P, double* Y, unsigned int N);
 
     void getCost(double* P, double* Y, unsigned int N, int D, double* costs);
     void getCost(unsigned int* row_P, unsigned int* col_P, double* val_P, double* Y, unsigned int N, int D, double theta, double* costs);

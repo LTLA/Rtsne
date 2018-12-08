@@ -200,7 +200,7 @@ void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, doubl
         if(exact) {
             computeExactGradient(P.data(), Y, N, NDims, dY.data());
         } else {
-            computeGradient(P.data(), row_P.data(), col_P.data(), val_P.data(), Y, N, dY.data(), theta);
+            computeGradient(P.data(), row_P.data(), col_P.data(), val_P.data(), Y, N, dY.data()); 
         }
 
         // Update gains
@@ -225,7 +225,7 @@ void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, doubl
             if(exact) {
                 C = evaluateError(P.data(), Y, N, NDims);
             } else {
-                C = evaluateError(row_P.data(), col_P.data(), val_P.data(), Y, N, theta);  // doing approximate computation here!
+                C = evaluateError(row_P.data(), col_P.data(), val_P.data(), Y, N);  // doing approximate computation here!
             }
             ++itercost;
 
@@ -260,7 +260,7 @@ void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, doubl
 
 // Compute gradient of the t-SNE cost function (using Barnes-Hut algorithm)
 template <int NDims>
-void TSNE<NDims>::computeGradient(double* P, unsigned int* inp_row_P, unsigned int* inp_col_P, double* inp_val_P, double* Y, unsigned int N, double* dC, double theta)
+void TSNE<NDims>::computeGradient(double* P, unsigned int* inp_row_P, unsigned int* inp_col_P, double* inp_val_P, double* Y, unsigned int N, double* dC)
 {
     // Construct space-partitioning tree on current map
     SPTree<NDims> tree(Y, N);
@@ -364,7 +364,7 @@ double TSNE<NDims>::evaluateError(double* P, double* Y, unsigned int N, int D) {
 
 // Evaluate t-SNE cost function (approximately)
 template <int NDims>
-double TSNE<NDims>::evaluateError(unsigned int* row_P, unsigned int* col_P, double* val_P, double* Y, unsigned int N, double theta)
+double TSNE<NDims>::evaluateError(unsigned int* row_P, unsigned int* col_P, double* val_P, double* Y, unsigned int N)
 {
     // Get estimate of normalization term
     SPTree<NDims> tree(Y, N);
