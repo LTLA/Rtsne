@@ -302,13 +302,13 @@ void TSNE<NDims>::computeExactGradient(double* P, double* Y, unsigned int N, int
 	for(unsigned int i = 0; i < N * D; i++) dC[i] = 0.0;
 
     // Compute the squared Euclidean distance matrix
-    double* DD = (double*) malloc((unsigned long)N * N * sizeof(double));
-    if(DD == NULL) { Rcpp::stop("Memory allocation failed!\n"); }
-    computeSquaredEuclideanDistance(Y, N, D, DD);
+    unsigned long N2=N;
+    N2 *=  N;
+    std::vector<double> DD(N2);
+    computeSquaredEuclideanDistance(Y, N, D, DD.data());
 
     // Compute Q-matrix and normalization sum
-    double* Q    = (double*) malloc((unsigned long)N * N * sizeof(double));
-    if(Q == NULL) { Rcpp::stop("Memory allocation failed!\n"); }
+    std::vector<double> Q(N2);
     double sum_Q = .0;
     for(unsigned long n = 0; n < N; n++) {
     	for(unsigned long m = 0; m < N; m++) {
@@ -330,22 +330,18 @@ void TSNE<NDims>::computeExactGradient(double* P, double* Y, unsigned int N, int
             }
 		}
 	}
-
-    // Free memory
-    free(DD); DD = NULL;
-    free(Q);  Q  = NULL;
 }
 
 
 // Evaluate t-SNE cost function (exactly)
 template <int NDims>
 double TSNE<NDims>::evaluateError(double* P, double* Y, unsigned int N, int D) {
-
+    unsigned long N2=N;
+    N2 *=  N;
+    std::vector<double> DD(N2), Q(N2);
+ 
     // Compute the squared Euclidean distance matrix
-    double* DD = (double*) malloc((unsigned long)N * N * sizeof(double));
-    double* Q = (double*) malloc((unsigned long)N * N * sizeof(double));
-    if(DD == NULL || Q == NULL) { Rcpp::stop("Memory allocation failed!\n"); }
-    computeSquaredEuclideanDistance(Y, N, D, DD);
+    computeSquaredEuclideanDistance(Y, N, D, DD.data());
 
     // Compute Q-matrix and normalization sum
     double sum_Q = DBL_MIN;
@@ -368,9 +364,6 @@ double TSNE<NDims>::evaluateError(double* P, double* Y, unsigned int N, int D) {
   		}
   	}
 
-    // Clean up memory
-    free(DD);
-    free(Q);
 	return C;
 }
 
@@ -412,10 +405,10 @@ template <int NDims>
 void TSNE<NDims>::getCost(double* P, double* Y, unsigned int N, int D, double* costs) {
 
   // Compute the squared Euclidean distance matrix
-  double* DD = (double*) malloc((unsigned long)N * N * sizeof(double));
-  double* Q = (double*) malloc((unsigned long)N * N * sizeof(double));
-  if(DD == NULL || Q == NULL) { Rcpp::stop("Memory allocation failed!\n"); }
-  computeSquaredEuclideanDistance(Y, N, D, DD);
+    unsigned long N2=N;
+    N2 *=  N;
+    std::vector<double> DD(N2), Q(N2);
+  computeSquaredEuclideanDistance(Y, N, D, DD.data());
 
   // Compute Q-matrix and normalization sum
   double sum_Q = DBL_MIN;
@@ -437,10 +430,6 @@ void TSNE<NDims>::getCost(double* P, double* Y, unsigned int N, int D, double* c
       costs[n] += P[n * N + m] * log((P[n * N + m] + 1e-9) / (Q[n * N + m] + 1e-9));
     }
   }
-
-  // Clean up memory
-  free(DD);
-  free(Q);
 }
 
 // Evaluate t-SNE cost function (approximately)
@@ -485,18 +474,21 @@ void TSNE<NDims>::computeGaussianPerplexity(double* X, unsigned int N, int D, bo
     P.resize(N2);
 
 	// Compute the squared Euclidean distance matrix
-	double* DD = (double*) malloc(N2 * sizeof(double));
-  if(DD == NULL) { Rcpp::stop("Memory allocation failed!\n"); }
+    const double* DD=NULL;
+    std::vector<double> DD_store;
 	
 	if (distance_precomputed) {
-	  DD = X;
+	    DD = X;
 	} else {
-	  computeSquaredEuclideanDistanceDirect(X, N, D, DD);
+        DD_store.resize(N2);
+	    computeSquaredEuclideanDistanceDirect(X, N, D, DD_store.data());
 	  
-	  // Needed to make sure the results are exactly equal to distance calculation in R
-	  for (size_t n=0; n<N*N; n++) {
-	    DD[n] = sqrt(DD[n])*sqrt(DD[n]);
-	  }
+	    // Needed to make sure the results are exactly equal to distance calculation in R
+	    for (size_t n=0; n<N*N; n++) {
+	        DD_store[n] = sqrt(DD_store[n])*sqrt(DD_store[n]);
+	    }
+
+        DD=DD_store.data();
 	}
 
 	// Compute the Gaussian kernel row by row
@@ -554,10 +546,6 @@ void TSNE<NDims>::computeGaussianPerplexity(double* X, unsigned int N, int D, bo
 		// Row normalize P
 		for(unsigned long m = 0; m < N; m++) P[n * N + m] /= sum_P;
 	}
-	
-	// Clean up memory
-	if (!distance_precomputed) { free(DD); }
-	DD = NULL;
 }
 
 
