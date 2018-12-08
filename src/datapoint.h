@@ -1,46 +1,30 @@
 #ifndef DATAPOINT_H
 #define DATAPOINT_H
+#include <cmath>
 
-class DataPoint
-{
-  int _ind;
-  
-public:
-  double* _x;
-  int _D;
-  DataPoint() {
-    _D = 1;
-    _ind = -1;
-    _x = NULL;
-  }
-  DataPoint(int D, int ind, double* x) {
-    _D = D;
-    _ind = ind;
-    _x = (double*) malloc(_D * sizeof(double));
-    for(int d = 0; d < _D; d++) _x[d] = x[d];
-  }
-  DataPoint(const DataPoint& other) {                     // this makes a deep copy -- should not free anything
-    if(this != &other) {
-      _D = other.dimensionality();
-      _ind = other.index();
-      _x = (double*) malloc(_D * sizeof(double));      
-      for(int d = 0; d < _D; d++) _x[d] = other.x(d);
-    }
-  }
-  ~DataPoint() { if(_x != NULL) free(_x); }
-  DataPoint& operator= (const DataPoint& other) {         // asignment should free old object
-    if(this != &other) {
-      if(_x != NULL) free(_x);
-      _D = other.dimensionality();
-      _ind = other.index();
-      _x = (double*) malloc(_D * sizeof(double));
-      for(int d = 0; d < _D; d++) _x[d] = other.x(d);
-    }
-    return *this;
-  }
-  int index() const { return _ind; }
-  int dimensionality() const { return _D; }
-  double x(int d) const { return _x[d]; }
+struct DataPoint {
+    int _ind;
+    const double* _x;
+    int _D;
+ 
+    DataPoint() : _ind(-1), _x(NULL), _D(0) {}
+    DataPoint(int D, int ind, double* x) : _ind(ind), _x(x), _D(D) {}
+    int index() const { return _ind; }
 };
+
+static inline double euclidean_distance(const DataPoint &t1, const DataPoint &t2) {
+    double dd = 0;
+    const double* x1=t1._x, *x2=t2._x;
+    for(int d = 0; d < t1._D; ++d, ++x1, ++x2) {
+        double tmp=x1-x2;
+        dd += tmp * tmp;
+    }
+    return std::sqrt(dd);
+}
+
+static inline double precomputed_distance(const DataPoint &t1, const DataPoint &t2) {
+    // '_x' is assumed to hold a column/row of a distance matrix for 't1'.
+    return t1._x[t2._ind];
+}
 
 #endif

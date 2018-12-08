@@ -46,18 +46,6 @@
 #ifndef VPTREE_H
 #define VPTREE_H
 
-double euclidean_distance(const DataPoint &t1, const DataPoint &t2) {
-  double dd = .0;
-  for(int d = 0; d < t1.dimensionality(); d++) dd += (t1.x(d) - t2.x(d)) * (t1.x(d) - t2.x(d));
-  return sqrt(dd);
-}
-
-double precomputed_distance(const DataPoint &t1, const DataPoint &t2) {
-  double dd = .0;
-  dd = t1.x(t2.index());
-  return dd;
-}
-
 template<typename T, double (*distance)( const T&, const T& )>
 class VpTree
 {
