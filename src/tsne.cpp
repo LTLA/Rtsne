@@ -266,20 +266,19 @@ template <int NDims>
 void TSNE<NDims>::computeGradient(double* P, unsigned int* inp_row_P, unsigned int* inp_col_P, double* inp_val_P, double* Y, unsigned int N, int D, double* dC, double theta)
 {
     // Construct space-partitioning tree on current map
-    SPTree<NDims>* tree = new SPTree<NDims>(Y, N);
+    SPTree<NDims> tree(Y, N);
 
     // Compute all terms required for t-SNE gradient
-    double* pos_f = (double*) calloc(N * D, sizeof(double));
-    double* neg_f = (double*) calloc(N * D, sizeof(double));
-    if(pos_f == NULL || neg_f == NULL) { Rcpp::stop("Memory allocation failed!\n"); }
-    tree->computeEdgeForces(inp_row_P, inp_col_P, inp_val_P, N, pos_f, num_threads);
+    std::vector<double> pos_f(N*D), neg_f(N*D);
+    tree.computeEdgeForces(inp_row_P, inp_col_P, inp_val_P, N, pos_f.data(), num_threads);
 
     // Storing the output to sum in single-threaded mode; avoid randomness in rounding errors.
+    // Do NOT use reduction as this does not preserve the order of addition of elements in sum_Q.
     std::vector<double> output(N);
 
     #pragma omp parallel for schedule(guided) num_threads(num_threads)
     for (unsigned int n = 0; n < N; n++) {
-      output[n]=tree->computeNonEdgeForces(n, theta, neg_f + n * D);
+        output[n]=tree.computeNonEdgeForces(n, theta, neg_f.data() + n * D);
     }
 
     double sum_Q = .0;
@@ -292,9 +291,7 @@ void TSNE<NDims>::computeGradient(double* P, unsigned int* inp_row_P, unsigned i
         dC[i] = pos_f[i] - (neg_f[i] / sum_Q);
     }
 
-    free(pos_f);
-    free(neg_f);
-    delete tree;
+    return;
 }
 
 // Compute gradient of the t-SNE cost function (exact)
