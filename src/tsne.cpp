@@ -159,20 +159,26 @@ void TSNE<NDims>::run(const int* nn_index, const double* nn_dist, unsigned int N
 // Perform main training loop
 template<int NDims>
 void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, double* itercost) {
-    // Allocate some memory
-    double* dY    = (double*) malloc(N * NDims * sizeof(double));
-    double* uY    = (double*) malloc(N * NDims * sizeof(double));
-    double* gains = (double*) malloc(N * NDims * sizeof(double));
-    if(dY == NULL || uY == NULL || gains == NULL) { Rcpp::stop("Memory allocation failed!\n"); }
-    for(unsigned int i = 0; i < N * NDims; i++)    uY[i] =  .0;
-    for(unsigned int i = 0; i < N * NDims; i++) gains[i] = 1.0;
+    std::vector<double> dY(N*NDims), uY(N*NDims, 0), gains(N*NDims, 1);
 
     // Lie about the P-values
-    if(exact) { for(unsigned long i = 0; i < (unsigned long)N * N; i++) P[i] *= exaggeration_factor; }
-    else {      for(unsigned long i = 0; i < row_P[N]; i++)    val_P[i] *= exaggeration_factor; }
+    {
+        std::vector<double>& cur_P=(exact ? P : val_P);
+        for (std::vector<double>::iterator pIt=cur_P.begin(); pIt!=cur_P.end(); ++pIt) { 
+            (*pIt) *= exaggeration_factor; 
+        }
+    }
 
 	// Initialize solution (randomly), if not already done
-	if (!init) { for(unsigned int i = 0; i < N * NDims; i++) Y[i] = randn() * .0001; }
+    if (!init) { 
+        Rcpp::RNGScope rng;
+        double * curY=Y;
+        for (int i=0; i < NDims; ++i) {
+            for(unsigned int j = 0; j < N; ++j, ++curY) {
+                (*curY) = R::norm_rand() * .0001;
+            }
+        }
+    }
 
   clock_t start = clock(), end;
   float total_time=0;
@@ -188,8 +194,8 @@ void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, doubl
         if(iter == mom_switch_iter) momentum = final_momentum;
 
         // Compute (approximate) gradient
-        if(exact) computeExactGradient(P.data(), Y, N, NDims, dY);
-        else computeGradient(P.data(), row_P.data(), col_P.data(), val_P.data(), Y, N, NDims, dY, theta);
+        if(exact) computeExactGradient(P.data(), Y, N, NDims, dY.data());
+        else computeGradient(P.data(), row_P.data(), col_P.data(), val_P.data(), Y, N, NDims, dY.data(), theta);
 
         // Update gains
         for(unsigned int i = 0; i < N * NDims; i++) gains[i] = (sign_tsne(dY[i]) != sign_tsne(uY[i])) ? (gains[i] + .2) : (gains[i] * .8);
@@ -226,9 +232,6 @@ void TSNE<NDims>::trainIterations(unsigned int N, double* Y, double* cost, doubl
     else      getCost(row_P.data(), col_P.data(), val_P.data(), Y, N, NDims, theta, cost);  // doing approximate computation here!
     
     // Clean up memory
-    free(dY);
-    free(uY);
-    free(gains);
     if (verbose) Rprintf("Fitting performed in %4.2f seconds.\n", total_time);
     return;
 }
@@ -838,22 +841,6 @@ void TSNE<NDims>::zeroMean(double* X, unsigned int N, int D) {
     nD += D;
   }
   free(mean); mean = NULL;
-}
-
-// Generates a Gaussian random number
-template <int NDims>
-double TSNE<NDims>::randn() {
-  Rcpp::RNGScope scope;
-	double x, y, radius;
-	do {
-		x = 2 * (double)R::runif(0,1) - 1;
-		y = 2 * (double)R::runif(0,1) - 1;
-		radius = (x * x) + (y * y);
-	} while((radius >= 1.0) || (radius == 0.0));
-	radius = sqrt(-2 * log(radius) / radius);
-	x *= radius;
-	y *= radius;
-	return x;
 }
 
 // declare templates explicitly
