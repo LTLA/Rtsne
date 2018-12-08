@@ -16,7 +16,7 @@ static inline double euclidean_distance(const DataPoint &t1, const DataPoint &t2
     double dd = 0;
     const double* x1=t1._x, *x2=t2._x;
     for(int d = 0; d < t1._D; ++d, ++x1, ++x2) {
-        double tmp=x1-x2;
+        double tmp=*x1 - *x2;
         dd += tmp * tmp;
     }
     return std::sqrt(dd);
